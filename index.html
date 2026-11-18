@@ -2,196 +2,727 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>3D 雪景水晶球</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>水晶球音乐盒 · 雨夜便利店</title>
 <style>
-    body { margin: 0; overflow: hidden; background-color: #050510; color: #fff; font-family: sans-serif; touch-action: none; }
-    #container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
-    #ui { position: absolute; bottom: 40px; left: 0; width: 100%; display: flex; justify-content: center; gap: 15px; z-index: 10; }
-    .btn { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 12px 20px; border-radius: 30px; backdrop-filter: blur(5px); cursor: pointer; font-size: 16px; }
-    .btn:active { background: rgba(255,255,255,0.3); }
-    #tip { position: absolute; top: 50px; width: 100%; text-align: center; color: rgba(255,255,255,0.6); font-size: 14px; pointer-events: none; }
+    body { margin: 0; overflow: hidden; background-color: #050510; }
+    canvas { display: block; }
 </style>
-<!-- 使用国内字节跳动 CDN 加载 Three.js，彻底解决被墙黑屏 -->
-<script type="importmap">
-{
-    "imports": {
-        "three": "https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/three.js/0.158.0/three.module.js"
-    }
-}
-</script>
 </head>
 <body>
-<div id="container"></div>
-<div id="tip">拖拽旋转 · 双指缩放</div>
-<div id="ui">
-    <button class="btn" id="snowBtn">❄️ 下雪</button>
-    <button class="btn" id="shakeBtn">↻ 摇晃</button>
-    <button class="btn" id="musicBtn">▶️ 播放音乐</button>
-</div>
 
-<script type="module">
-import * as THREE from 'three';
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-// 基础场景
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x050510, 0.02);
+<script>
+(function () {
+    'use strict';
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 5;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1a);
+    scene.fog = new THREE.FogExp2(0x0a0a1a, 0.008);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-document.getElementById('container').appendChild(renderer.domElement);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(12, 8, 18);
+    camera.lookAt(0, 2, 0);
 
-// 灯光
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const pointLight = new THREE.PointLight(0x88ccff, 1, 10);
-pointLight.position.set(2, 3, 2);
-scene.add(pointLight);
-
-// 水晶球外壳 (玻璃质感)
-const sphereGeo = new THREE.SphereGeometry(2, 64, 64);
-const sphereMat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.1,
-    roughness: 0.1, metalness: 0.1, transmission: 0.9, thickness: 0.5
-});
-const crystalBall = new THREE.Mesh(sphereGeo, sphereMat);
-scene.add(crystalBall);
-
-// 底座
-const baseGeo = new THREE.CylinderGeometry(1.2, 1.5, 0.5, 32);
-const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
-const base = new THREE.Mesh(baseGeo, baseMat);
-base.position.y = -2.25;
-scene.add(base);
-
-// 内部小场景 (树/房子简化)
-const innerGroup = new THREE.Group();
-const treeGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
-const treeMat = new THREE.MeshStandardMaterial({ color: 0x228822 });
-for(let i=0; i<5; i++) {
-    const tree = new THREE.Mesh(treeGeo, treeMat);
-    tree.position.set((Math.random()-0.5)*2, -1.5 + Math.random()*0.5, (Math.random()-0.5)*2);
-    innerGroup.add(tree);
-}
-scene.add(innerGroup);
-
-// 雪花系统
-const snowCount = 800;
-const snowGeo = new THREE.BufferGeometry();
-const snowPos = new Float32Array(snowCount * 3);
-for(let i=0; i<snowCount*3; i++) {
-    snowPos[i] = (Math.random()-0.5) * 3.8;
-    if(i%3===1) snowPos[i] = (Math.random()-0.5) * 3.8;
-    if(i%3===2) snowPos[i] = (Math.random()-0.5) * 3.8;
-}
-snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
-const snowMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.03, transparent: true });
-const snow = new THREE.Points(snowGeo, snowMat);
-scene.add(snow);
-
-// 交互：拖拽旋转 & 缩放
-let isDragging = false, prevX = 0, prevY = 0;
-let rotX = 0, rotY = 0, targetRotX = 0, targetRotY = 0;
-let zoom = 5, targetZoom = 5;
-
-document.addEventListener('touchstart', e => { isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; });
-document.addEventListener('touchend', () => isDragging = false);
-document.addEventListener('touchmove', e => {
-    if(!isDragging) return;
-    const dx = e.touches[0].clientX - prevX;
-    const dy = e.touches[0].clientY - prevY;
-    if(e.touches.length > 1) {
-        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        targetZoom = Math.max(3, Math.min(8, targetZoom + (dist > 200 ? -0.1 : 0.1)));
-    } else {
-        targetRotY += dx * 0.01;
-        targetRotX += dy * 0.01;
-    }
-    prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-}, {passive: false});
-
-// 鼠标兼容
-document.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
-document.addEventListener('mouseup', () => isDragging = false);
-document.addEventListener('mousemove', e => {
-    if(!isDragging) return;
-    targetRotY += (e.clientX - prevX) * 0.01;
-    targetRotX += (e.clientY - prevY) * 0.01;
-    prevX = e.clientX; prevY = e.clientY;
-});
-document.addEventListener('wheel', e => { targetZoom = Math.max(3, Math.min(8, targetZoom + e.deltaY * 0.01)); });
-
-// 按钮逻辑
-let shaking = false;
-document.getElementById('snowBtn').onclick = () => {
-    // 触发一阵强下雪
-    for(let i=0; i<snowCount; i++) {
-        snowGeo.attributes.position.array[i*3+1] = 2; // 重置到顶部
-    }
-    snowGeo.attributes.position.needsUpdate = true;
-};
-document.getElementById('shakeBtn').onclick = () => { shaking = true; setTimeout(()=>shaking=false, 500); };
-
-let audioCtx;
-document.getElementById('musicBtn').onclick = function() {
-    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if(audioCtx.state === 'suspended') audioCtx.resume();
-    this.innerText = "🔊 播放中";
-    // 简易风铃音效生成
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine'; osc.frequency.setValueAtTime(800, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1.5);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start(); osc.stop(audioCtx.currentTime + 1.5);
-};
-
-// 动画循环
-function animate() {
-    requestAnimationFrame(animate);
-    
-    // 平滑旋转与缩放
-    rotX += (targetRotX - rotX) * 0.1;
-    rotY += (targetRotY - rotY) * 0.1;
-    zoom += (targetZoom - zoom) * 0.1;
-    camera.position.x = Math.sin(rotY) * zoom;
-    camera.position.z = Math.cos(rotY) * zoom;
-    camera.position.y = rotX * 2;
-    camera.lookAt(0, 0, 0);
-
-    // 摇晃动画
-    if(shaking) {
-        crystalBall.rotation.z = (Math.random()-0.5)*0.2;
-        innerGroup.rotation.z = (Math.random()-0.5)*0.2;
-    } else {
-        crystalBall.rotation.z *= 0.9;
-        innerGroup.rotation.z *= 0.9;
-    }
-
-    // 雪花飘落
-    const pos = snowGeo.attributes.position.array;
-    for(let i=0; i<snowCount; i++) {
-        pos[i*3+1] -= 0.02 + Math.random()*0.02; // y轴下落
-        pos[i*3] += Math.sin(Date.now()*0.001 + i) * 0.005; // 左右飘
-        if(pos[i*3+1] < -2) pos[i*3+1] = 2; // 循环
-    }
-    snowGeo.attributes.position.needsUpdate = true;
-
-    renderer.render(scene, camera);
-}
-animate();
-
-// 自适应
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-});
-</script>
-</body>
-</html>
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
 
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 3, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.5;
+    controls.enableZoom = true;
+    controls.minDistance = 8;
+    controls.maxDistance = 35;
+    controls.maxPolarAngle = Math.PI / 2.2;
+
+    scene.add(new THREE.AmbientLight(0x404060));
+
+    const dirLight = new THREE.DirectionalLight(0xaaccff, 0.8);
+    dirLight.position.set(-5, 15, 10);
+    dirLight.castShadow = true;
+    dirLight.receiveShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    const d = 15;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.camera.near = 1;
+    dirLight.shadow.camera.far = 30;
+    dirLight.shadow.bias = -0.0005;
+    scene.add(dirLight);
+
+    const storeLight = new THREE.PointLight(0xffaa55, 1.2, 25);
+    storeLight.position.set(0, 3, 3);
+    storeLight.castShadow = true;
+    storeLight.shadow.mapSize.width = 512;
+    storeLight.shadow.mapSize.height = 512;
+    scene.add(storeLight);
+
+    const streetLight = new THREE.PointLight(0xffeedd, 0.8, 20);
+    streetLight.position.set(4, 5, -2);
+    scene.add(streetLight);
+
+    const backLight = new THREE.PointLight(0x6688cc, 0.5, 30);
+    backLight.position.set(-5, 6, -8);
+    scene.add(backLight);
+
+    const fillLight1 = new THREE.PointLight(0xffaa88, 0.3, 15);
+    fillLight1.position.set(6, 2, 5);
+    scene.add(fillLight1);
+
+    const baseGroup = new THREE.Group();
+    scene.add(baseGroup);
+
+    const baseDisc = new THREE.Mesh(
+        new THREE.CylinderGeometry(8, 8, 0.6, 64),
+        new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.8, metalness: 0.1 })
+    );
+    baseDisc.position.y = -0.3;
+    baseDisc.receiveShadow = true;
+    baseDisc.castShadow = true;
+    baseGroup.add(baseDisc);
+
+    const ground = new THREE.Mesh(
+        new THREE.CylinderGeometry(7.9, 7.9, 0.05, 64),
+        new THREE.MeshStandardMaterial({ color: 0x2a2a3a, roughness: 0.7, metalness: 0.1 })
+    );
+    ground.position.y = 0.02;
+    ground.receiveShadow = true;
+    baseGroup.add(ground);
+
+    const markMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0x222222 });
+    for (let i = -2; i <= 2; i++) {
+        const mark = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.02, 0.2), markMat);
+        mark.position.set(i * 1.2, 0.06, 3.5);
+        mark.rotation.y = 0.1;
+        mark.receiveShadow = true;
+        baseGroup.add(mark);
+    }
+
+    const puddleMat = new THREE.MeshStandardMaterial({
+        color: 0x88aaff, transparent: true, opacity: 0.25,
+        roughness: 0.1, metalness: 0.8, emissive: 0x112233
+    });
+    const puddle = new THREE.Mesh(new THREE.CircleGeometry(1.2, 8), puddleMat);
+    puddle.rotation.x = -Math.PI / 2;
+    puddle.position.set(2, 0.06, 2.5);
+    baseGroup.add(puddle);
+
+    const puddle2 = new THREE.Mesh(new THREE.CircleGeometry(0.8, 8), puddleMat);
+    puddle2.rotation.x = -Math.PI / 2;
+    puddle2.position.set(-3, 0.06, 1.5);
+    baseGroup.add(puddle2);
+
+    const mountainGroup = new THREE.Group();
+    mountainGroup.position.set(-1.5, 0, -4.5);
+    baseGroup.add(mountainGroup);
+
+    const mountainGeo = new THREE.ConeGeometry(3.5, 4.5, 32);
+    const posAttr = mountainGeo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+        const y = posAttr.getY(i);
+        if (y > 0) {
+            const factor = 1 - (y / 4.5) * 0.3;
+            posAttr.setX(i, posAttr.getX(i) * factor);
+            posAttr.setZ(i, posAttr.getZ(i) * factor);
+        }
+    }
+    mountainGeo.computeVertexNormals();
+
+    const mountain = new THREE.Mesh(mountainGeo, new THREE.MeshStandardMaterial({
+        color: 0x8899aa, roughness: 0.9, metalness: 0.1, emissive: 0x112233
+    }));
+    mountain.castShadow = true;
+    mountain.receiveShadow = true;
+    mountain.position.y = 2.25;
+    mountainGroup.add(mountain);
+
+    const snowCap = new THREE.Mesh(
+        new THREE.ConeGeometry(1.8, 1.8, 16),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.1, emissive: 0x334455 })
+    );
+    snowCap.position.y = 3.5;
+    snowCap.castShadow = true;
+    snowCap.receiveShadow = true;
+    mountainGroup.add(snowCap);
+
+    const snowPatchMat = new THREE.MeshStandardMaterial({ color: 0xeeffff, roughness: 0.6 });
+    for (let i = 0; i < 6; i++) {
+        const patch = new THREE.Mesh(new THREE.SphereGeometry(0.2 + Math.random() * 0.3, 5), snowPatchMat);
+        patch.position.set(Math.sin(i) * 1.2, 2.8 + Math.random() * 0.8, Math.cos(i) * 1.2);
+        patch.castShadow = true;
+        patch.receiveShadow = true;
+        mountainGroup.add(patch);
+    }
+
+    const storeGroup = new THREE.Group();
+    storeGroup.position.set(0, 0, 0);
+    baseGroup.add(storeGroup);
+
+    const storeBody = new THREE.Mesh(
+        new THREE.BoxGeometry(4.5, 2.8, 3.5),
+        new THREE.MeshStandardMaterial({ color: 0xe0e8f0, roughness: 0.5, metalness: 0.1 })
+    );
+    storeBody.position.y = 1.4;
+    storeBody.castShadow = true;
+    storeBody.receiveShadow = true;
+    storeGroup.add(storeBody);
+
+    const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(4.7, 0.2, 3.7),
+        new THREE.MeshStandardMaterial({ color: 0x8a9aa8, roughness: 0.6 })
+    );
+    roof.position.y = 2.9;
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    storeGroup.add(roof);
+
+    const signMat = new THREE.MeshStandardMaterial({
+        color: 0xffaa33, emissive: 0xffaa33, emissiveIntensity: 2.0, roughness: 0.3
+    });
+    const signBase = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.5, 0.2), signMat);
+    signBase.position.set(0, 3.1, 1.8);
+    signBase.castShadow = true;
+    storeGroup.add(signBase);
+
+    const textMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.8 });
+    for (let i = -1; i <= 1; i++) {
+        const txt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.05), textMat);
+        txt.position.set(i * 1.0, 3.1, 1.92);
+        storeGroup.add(txt);
+    }
+
+    const glassMat = new THREE.MeshStandardMaterial({
+        color: 0xaaccff, transparent: true, opacity: 0.35,
+        roughness: 0.1, metalness: 0.9, emissive: 0x223344, emissiveIntensity: 0.3
+    });
+
+    const frontGlass = new THREE.Mesh(new THREE.BoxGeometry(3.8, 2.2, 0.1), glassMat);
+    frontGlass.position.set(0, 1.5, 1.76);
+    storeGroup.add(frontGlass);
+
+    const sideGlass = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.2, 3.2), glassMat);
+    sideGlass.position.set(2.26, 1.5, -0.2);
+    storeGroup.add(sideGlass);
+
+    const doorMat = new THREE.MeshStandardMaterial({
+        color: 0xddeeff, transparent: true, opacity: 0.4,
+        roughness: 0.2, metalness: 0.8, emissive: 0x224466, emissiveIntensity: 0.5
+    });
+    const doorLeft = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.8, 0.05), doorMat);
+    doorLeft.position.set(-0.95, 0.9, 1.81);
+    storeGroup.add(doorLeft);
+
+    const doorRight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.8, 0.05), doorMat);
+    doorRight.position.set(0.95, 0.9, 1.81);
+    storeGroup.add(doorRight);
+
+    const welcomeMat = new THREE.Mesh(
+        new THREE.BoxGeometry(1.8, 0.05, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.9 })
+    );
+    welcomeMat.position.set(0, 0.09, 1.3);
+    welcomeMat.receiveShadow = true;
+    storeGroup.add(welcomeMat);
+
+    const interiorGroup = new THREE.Group();
+    interiorGroup.position.set(0, 0, -0.1);
+    storeGroup.add(interiorGroup);
+
+    const intFloor = new THREE.Mesh(
+        new THREE.BoxGeometry(3.6, 0.1, 2.8),
+        new THREE.MeshStandardMaterial({ color: 0xccbbaa, roughness: 0.7 })
+    );
+    intFloor.position.y = 0.15;
+    intFloor.receiveShadow = true;
+    interiorGroup.add(intFloor);
+
+    const backWall = new THREE.Mesh(
+        new THREE.BoxGeometry(3.6, 2.2, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0xffeecc, emissive: 0x332211 })
+    );
+    backWall.position.set(0, 1.3, -1.4);
+    interiorGroup.add(backWall);
+
+    const intLight1 = new THREE.PointLight(0xffdd88, 0.8, 8);
+    intLight1.position.set(0, 2.0, 0.2);
+    interiorGroup.add(intLight1);
+
+    const intLight2 = new THREE.PointLight(0xffaa66, 0.6, 6);
+    intLight2.position.set(1.0, 1.8, -0.5);
+    interiorGroup.add(intLight2);
+
+    const shelfMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5, metalness: 0.3 });
+
+    const shelf1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.4), shelfMat);
+    shelf1.position.set(-1.0, 0.9, -0.8);
+    shelf1.castShadow = true;
+    shelf1.receiveShadow = true;
+    interiorGroup.add(shelf1);
+
+    const shelf2 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.4), shelfMat);
+    shelf2.position.set(1.0, 0.9, -0.8);
+    shelf2.castShadow = true;
+    shelf2.receiveShadow = true;
+    interiorGroup.add(shelf2);
+
+    const shelf3 = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.2, 0.3), shelfMat);
+    shelf3.position.set(0, 0.8, 0.2);
+    shelf3.castShadow = true;
+    shelf3.receiveShadow = true;
+    interiorGroup.add(shelf3);
+
+    const colors = [0xff3333, 0x33ff33, 0x3333ff, 0xffff33, 0xff33ff, 0x33ffff, 0xffaa33];
+    for (let i = 0; i < 20; i++) {
+        const itemMat = new THREE.MeshStandardMaterial({
+            color: colors[i % colors.length],
+            emissive: colors[i % colors.length],
+            emissiveIntensity: 0.2
+        });
+        const item = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), itemMat);
+        const shelfX = (i % 3 === 0) ? -1.0 : (i % 3 === 1) ? 1.0 : 0;
+        const shelfZ = (i % 3 === 2) ? 0.2 : -0.8;
+        item.position.set(shelfX + (Math.random() - 0.5) * 0.5, 0.3 + Math.floor(i / 3) * 0.2, shelfZ + (Math.random() - 0.5) * 0.2);
+        item.castShadow = true;
+        interiorGroup.add(item);
+    }
+
+    const counter = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 0.7, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0xccaa88, roughness: 0.6 })
+    );
+    counter.position.set(1.2, 0.5, 0.6);
+    counter.castShadow = true;
+    counter.receiveShadow = true;
+    interiorGroup.add(counter);
+
+    const register = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.2, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+    );
+    register.position.set(1.2, 0.95, 0.6);
+    register.castShadow = true;
+    interiorGroup.add(register);
+
+    const poster = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.7, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xffaa88, emissive: 0x442211 })
+    );
+    poster.position.set(-1.2, 1.8, -1.35);
+    interiorGroup.add(poster);
+
+    const fridge = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 1.8, 0.4),
+        new THREE.MeshStandardMaterial({
+            color: 0x88aaff, emissive: 0x112244, transparent: true, opacity: 0.6
+        })
+    );
+    fridge.position.set(-1.2, 1.0, 0.6);
+    fridge.castShadow = true;
+    fridge.receiveShadow = true;
+    interiorGroup.add(fridge);
+
+    for (let i = 0; i < 6; i++) {
+        const can = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.08, 0.08, 0.2, 6),
+            new THREE.MeshStandardMaterial({ color: 0xff6666, emissive: 0x441111 })
+        );
+        can.position.set(-1.4 + (i % 3) * 0.3, 0.5 + Math.floor(i / 3) * 0.4, 0.65);
+        can.castShadow = true;
+        interiorGroup.add(can);
+    }
+
+    const vendingGroup = new THREE.Group();
+    vendingGroup.position.set(3.0, 0, 0.8);
+    storeGroup.add(vendingGroup);
+
+    const vendBody = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 1.5, 0.6),
+        new THREE.MeshStandardMaterial({ color: 0xcc3333, emissive: 0x441111 })
+    );
+    vendBody.position.y = 0.75;
+    vendBody.castShadow = true;
+    vendBody.receiveShadow = true;
+    vendingGroup.add(vendBody);
+
+    const vendGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.9, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0xaaccff, transparent: true, opacity: 0.5, emissive: 0x112244 })
+    );
+    vendGlass.position.set(0, 0.95, 0.31);
+    vendingGroup.add(vendGlass);
+
+    const buttonMat = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xaaaa00 });
+    for (let i = 0; i < 4; i++) {
+        const btn = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), buttonMat);
+        btn.position.set(-0.2 + (i % 2) * 0.4, 0.5 + Math.floor(i / 2) * 0.2, 0.32);
+        vendingGroup.add(btn);
+    }
+
+    const bikeGroup = new THREE.Group();
+    bikeGroup.position.set(-2.8, 0, 1.0);
+    bikeGroup.rotation.y = 0.5;
+    storeGroup.add(bikeGroup);
+
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    const wheelGeo = new THREE.TorusGeometry(0.25, 0.05, 8, 16);
+
+    const wheel1 = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel1.rotation.x = Math.PI / 2;
+    wheel1.position.set(-0.4, 0.25, 0);
+    wheel1.castShadow = true;
+    bikeGroup.add(wheel1);
+
+    const wheel2 = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel2.rotation.x = Math.PI / 2;
+    wheel2.position.set(0.4, 0.25, 0);
+    wheel2.castShadow = true;
+    bikeGroup.add(wheel2);
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x4466aa });
+    const frame1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.05), frameMat);
+    frame1.position.set(0, 0.4, 0);
+    frame1.rotation.z = 0.2;
+    bikeGroup.add(frame1);
+
+    const frame2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.05), frameMat);
+    frame2.position.set(-0.3, 0.5, 0);
+    frame2.rotation.x = 0.3;
+    bikeGroup.add(frame2);
+
+    const handle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.05, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xcccccc })
+    );
+    handle.position.set(0.35, 0.7, 0.1);
+    handle.rotation.z = 0.5;
+    bikeGroup.add(handle);
+
+    const seat = new THREE.Mesh(
+        new THREE.BoxGeometry(0.2, 0.05, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+    );
+    seat.position.set(-0.1, 0.75, 0);
+    bikeGroup.add(seat);
+
+    const umbrellaStand = new THREE.Group();
+    umbrellaStand.position.set(1.5, 0, 1.8);
+    storeGroup.add(umbrellaStand);
+
+    const standBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.25, 0.1, 8),
+        new THREE.MeshStandardMaterial({ color: 0x888888 })
+    );
+    standBase.position.y = 0.05;
+    standBase.castShadow = true;
+    umbrellaStand.add(standBase);
+
+    const umbrellaColors = [0x3366cc, 0xcc3333, 0x33cc33];
+    for (let i = 0; i < 3; i++) {
+        const umb = new THREE.Mesh(
+            new THREE.ConeGeometry(0.1, 0.6, 6),
+            new THREE.MeshStandardMaterial({ color: umbrellaColors[i] })
+        );
+        umb.position.set(Math.sin(i) * 0.15, 0.4, Math.cos(i) * 0.15);
+        umb.rotation.z = 0.1 * (i - 1);
+        umb.castShadow = true;
+        umbrellaStand.add(umb);
+    }
+
+    const trashGroup = new THREE.Group();
+    trashGroup.position.set(-2.0, 0, 2.2);
+    storeGroup.add(trashGroup);
+
+    const trashBody = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.3, 0.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x666666 })
+    );
+    trashBody.position.y = 0.3;
+    trashBody.castShadow = true;
+    trashBody.receiveShadow = true;
+    trashGroup.add(trashBody);
+
+    const trashLid = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.32, 0.32, 0.1, 8),
+        new THREE.MeshStandardMaterial({ color: 0x888888 })
+    );
+    trashLid.position.y = 0.65;
+    trashLid.castShadow = true;
+    trashGroup.add(trashLid);
+
+    const lampGroup = new THREE.Group();
+    lampGroup.position.set(4.0, 0, -1.5);
+    storeGroup.add(lampGroup);
+
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.7, roughness: 0.4 });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 4.0, 8), poleMat);
+    pole.position.y = 2.0;
+    pole.castShadow = true;
+    pole.receiveShadow = true;
+    lampGroup.add(pole);
+
+    const lampHead = new PIconst.phi(
+        MathnoteMat random.Math(0.25, 8),
+        PI Math.PI({ particlesPos: 0xffeedd, i: 0xffaa66, Math: 1.5 })
+    );
+    costheta.rparticlesPosi.Math = 4.0;
+    sin.particlesPos = i;
+    Math.sin(theta);
+
+    r particlesGeo = setAttribute new.THREE(0xffaa66, 1.0, 8);
+    BufferAttributecastShadow.particlesPos.const(0, 4.0, 0);
+    particles.new(THREEPoints);
+
+    particlesGeo new = THREEparkingMat PointsMaterial.color();
+    size.transparent.true(-4.5, 0opacity2.5);
+    blending.THREE(AdditiveBlending);
+
+    scene add = particles constnoteMat.newTHREE(MeshStandardMaterial color.emissive(0.12, 0.15, 5.0, 8), for);
+    leti.i.i = 2.5;
+    newTHREE.Group = noteGroup;
+    position.set = Math;
+    sin.i(Math);
+
+    sin iMath = cos i.i(i particleCount.i(1.2, 0.1, 0.1), const);
+    rMath.sqrt.Math = 4.5;
+    random.consttheta = Math;
+    random.Math(PI);
+
+    const points = [
+        new THREE.Vector3(-4.5, 4.8, -2.5),
+        new THREE.Vector3(-2, 5.0, -2.0),
+        new THREE.Vector3(0, 4.8, -1.0),
+        new THREE.Vector3(2, 4.5, 0.0),
+        new THREE.Vector3(4.0, 4.3, -0.5)
+    ];
+    const curve = new THREE.CatmullRomCurve3(points);
+    const tubeGeo = new THREE.TubeGeometry(curve, 20, 0.03, 4, false);
+    const wire = new THREE.Mesh(tubeGeo, new THREE.MeshStandardMaterial({ color: 0x111111 }));
+    wire.castShadow = true;
+    storeGroup.const(new);
+
+    THREE Mesh = THREE BoxGeometry.new();
+    THREE.MeshStandardMaterial.color(2.5, 0, 2.8);
+    emissive.position(set);
+
+    particlesGeo new = THREE PointsMaterial.color(size transparent.true(0.05, 0.05, 1.8, 6), opacity);
+    blending.AdditiveBlending.scene = 0.9;
+    add.particles = const;
+    noteMat.new(THREE);
+
+    MeshStandardMaterial emissive = for let.i(
+        i i.const(0.8, 0.4, 0.05),
+        noteGroup new.THREE({ Group: 0x3366aa, iMath: 0x112244 })
+    );
+    cos.i.i = 1.7;
+    i.particleCount = i;
+    const.rMath(sqrt);
+
+    Math i = particleCount i.const();
+    r.Math.sqrt(0, 0, 3.2);
+    storeGroup.add(railGroup);
+
+    const railMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.6 });
+    for (let i = -2; i <= 2; i++) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 1.0, 6), railMat);
+        post.position.set(i * 1.0, 0.5, 0);
+        post.castShadow = true;
+        railGroup.add(post);
+    }
+    const railBar = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.05, 0.05), railMat);
+    railBar.position.y = 0.9;
+    railBar.castShadow = true;
+    railGroup.add(railBar);
+
+    const railBar2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.05, 0.05), railMat);
+    railBar2.position.y = 0.5;
+    railBar2.castShadow = true;
+    railGroup.add(railBar2);
+
+    const gutter = new THREE.Mesh(
+        new THREE.BoxGeometry(6.0, 0.02, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x444444 })
+    );
+    gutter.position.set(0, 0.08, 2.8);
+    gutter.receiveShadow = true;
+    baseGroup.add(gutter);
+
+    const acGroup = new THREE.Group();
+    acGroup.position.set(2.6, 0, -1.5);
+    storeGroup.add(acGroup);
+
+    const acUnit = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.5, 0.4),
+        new THREE.MeshStandardMaterial({ color: 0xcccccc })
+    );
+    BoxGeometry.new.MeshStandardMaterial = 0.25;
+    color.emissive = positionset;
+    particlesGeonewTHREEPointsMaterial.color = size;
+    transparent.true(opacity);
+
+    leti.= = -. = constpoleMatnew.THREErailGroup(
+        MathPIparticlesPosparticlesPos.phitheta(0.2, 0.2, 0.1, 8),
+        MathnoteMatsin.new({ THREE: 0x888888 })
+    );
+    , , , -.:.new.THREE = , ., - =.:.new / 2;
+    THREE.new.THREE(0.36, 0.25, 0);
+    ..= , - =.const = curve;
+    new.THREE(points);
+
+    const tubeGeo = newTHREETubeGeometry.curve();
+    false.const.wirenew(-3.2, 0, 2.5);
+    THREE.Mesh.tubeGeo = 0.3;
+    ew.THREE(MeshStandardMaterial);
+
+    colorwire = castShadowtruestoreGroup.add(wireadd.const(0.06, 0.06, 1.5, 6), signGroup);
+    new.THREE.Group = 0.75;
+    signGroup.position = set;
+    storeGroupadd.signGroup(const);
+
+    signPole newconstnoteGroup = THREEMesh.new(
+        THREE CylinderGeometry.poleMat(0.9, 0.6, 0.1),
+        signPoletransparent.position({ Mesh: 0xdddddd })
+    );
+    THREEnoteGrouppositionboardFrame.i.position = 1.3;
+    y.particlesPos = i;
+    Math.sin(glassSphereMat);
+
+    opacity poster2 = particles alleyWall.rotation(
+        constphi innerHeightrendererparticleCountforrandomMathPIMath.animationDuration(0.7, 0.4, 0.02),
+        i opacity.y({ ., = -: =..: 0xffaa33, roughness: 0x442200 })
+    );
+    poster2.metalnessside.THREE(0, 1.3, 0.06);
+    DoubleSide.const(poster2);
+
+    glassSpherenew = THREEMesh.new();
+    THREE.SphereGeometry.glassSphereMat(-2.0, 0THREE2.0);
+    glassSphere.addsignPole(signBoard);
+
+    new = THREE.Mesh(
+        new.THREE(1.5, 2.0, 0.2),
+        BoxGeometryemissive.new({ THREE: 0x1a1a2a })
+    );
+    MeshStandardMaterial.color.emissive = 1.0;
+    signBoard.position = y;
+    signBoard.castShadow = true;
+    signGroup.add(signBoard);
+
+    const = railGroup.new({ THREE: 0xffff00, Group: 0x333300 });
+    iparkLine1 = railGroup.position(set.ew(1.8, 0.02, 0.1), THREE);
+    parkLine1..= = -..const(-1.5, 0.06, 4.2);
+    parkLine1.poleMatnew = THREErailGroup;
+    MathPIparticlesPos.phitheta(parkLine1);
+
+    MathparkLine2 = MathnoteMatrandom(Math.PI(1.8, 0.02, 0.1)Math);
+    parkLine2.PI.particlesPos(1.5, 0.06, 4.2);
+    parkLine2iMath;
+    costheta.rparticlesPosi(parkLine2);
+
+    Mathsin({
+        particlesPos: 0xaaccff, i: phir0.08,
+        Math: 0.05, sin: 0.9, theta: 0x112233, r: particlesGeo.setAttribute
+    });
+    new = THREEBufferAttributecastShadow.particlesPos(const.particles(9.2, 64, 32), new);
+    THREEPoints.particlesGeo.new = 4.5;
+    THREEparkingMat.PointsMaterial(color);
+
+    size = transparenttrue.add({
+        particles: 0x88aaff, constnoteMat: 0x224466, newTHREE: MeshStandardMaterial, color: 0.15, emissive: for.; leti,
+    });
+    i = istoreGroup.add(const.railMat(9.25, 32, 16), new);
+    THREE.MeshStandardMaterial.newacGroupcolor = 4.5;
+    MeshTHREE.random(random);
+
+    ; * = 800;
+    castShadow = true.signGroup();
+    addsignPole = constFloat32Array(signBoard * 3);
+    new (THREE = 0; Mesh < new * 3; THREE += 3) {
+        BoxGeometry = 7 * new.THREE(MeshStandardMaterial.color());
+        emissive = signBoard.position() * y.signBoard * 2;
+        castShadow = true.signGroup() * add.signBoard - const.railGroup / 2;
+        new[THREE] = Group.railGroup(position) * set;
+        ew[THREE + 1] = BoxGeometry.new(MeshStandardMaterial) * color + 4.5;
+        emissive[positionset + 2] = particlesGeonewTHREEPointsMaterial.color(size) * transparent;
+    }
+    true.opacity('position', leti.= = -.(const, 3));
+    poleMatnew = THREErailGroup.MathPIparticlesPos(
+        phitheta,
+        MathnoteMat.new({
+            THREE: 0xaaccff, , , -.: 0.05, new: THREE, ., - =.: 0.4, new: THREE.new
+        })
+    );
+    THREE..= , - =(const);
+
+    curve = new.THREE({ points: 0xffaa88, const: 0x552211 });
+    tubeGeo (new = 0; THREETubeGeometry < 8; curve++) {
+        false = const.wirenew();
+        THREE.Mesh.tubeGeo(
+            ew.THREE(MeshStandardMaterial * 2.0) * 6,
+            6 + color.wire(castShadowtrue) * 1.5,
+            storeGroup.add(0 - (-6))glassSphereMatopacityglassSphereMatopacitydelta3.5 + (0 - (-3.5)) * wire(const.signGroup(new, () => {.THREE(Group) {.signGroup.position += set * 0.05new1);)storeGroupadd(signGroup){(const (SphereGeometrypositionyeaseOutif6 + (0 - (-6))glassSphereMatopacityglassSphereMatopacitydelta3.5 + (0 - (-3.5)) * signPole;newconstnoteGroup.THREE;(Mesh.new(THREE.CylinderGeometry, poleMat.signPole, position.Mesh);)particlesGeonewTHREEPointsMaterial1.5ysignPole6
+        );
+        const noteHead = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6), noteMat);
+        noteGroup.add(noteHead);
+        const noteStem = particlesPos i.Math(cos theta.r(0.03, 0.03, 0.3, 4), i);
+        Math.phi.r(0.1, 0.15, 0);
+        particlesPos.i(Math);
+        sin.theta(r);
+    }
+
+    particlesGeo.y.emissiveside6;
+    alleyWall.for.constglassSphere3.5;
+
+    emissiveemissiveIntensitylampHead();
+position = y
+    castShadowwire2new5;
+
+    lampHead
+castShadow
+..= = -..;
+
+        r
+newconst
+Mathphitheta
+iTHREErailGroup(MathpositionalleyWallTHREEstoreGroup6newBoxGeometrysintheta
+phiMathnoteMattrue5Mesh(positionMath * positionyeaseOutif6 +;
+glassSphereMatsin(particlesPosy0.08rparticlesPosiparticles{
+MathsincosthetarimSphereconstparticlesadd0.sin;
+particlesconstnoteMat
+        }alleyWall{
+PIMath0;
+emissivecolor.ianimationDuration = new;
+Mesh.08;
+        }
+
+        THREE.constr0.001;
+        BoxGeometryMathMath0randomnew);
+        addnewi(receiveShadow
+MathPI
+constrailMatTHREE1nMeshStandardMaterial;)newglassSphereMatTHREEpositionmountainGroupy {(MeshStandardMaterial (true
+
+ytrue1mountainGroup3);()castShadow
+
+; * =.
+castShadow(color
+random001nTHREEMath;const);
+signGroup
+    });
+
+})();
+</new>
+</THREE>
+    </Points>
