@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>雨夜便利店 水晶球音乐盒</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#050510; overflow:hidden; touch-action:none; }
+canvas { display:block; }
+#loading {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:rgba(255,255,255,0.7); font:16px/1.6 -apple-system,sans-serif;
+  text-align:center; pointer-events:none;
+}
+#loading.hide { display:none; }
+#hint {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  color:rgba(255,255,255,0.4); font:13px/1.4 -apple-system,sans-serif;
+  text-align:center; pointer-events:none; user-select:none;
+}
+</style>
+</head>
+<body>
+<div id="loading">加载中...</div>
+<div id="hint">拖拽旋转 · 双指/滚轮缩放</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script>
+if(typeof THREE==='undefined'){
+  document.getElementById('loading').innerHTML='加载失败<br>请检查网络连接';
+  throw new Error('THREE not loaded');
+}
+
+// ===== 场景 =====
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x050510);
+scene.fog=new THREE.Fog(0x050510,6,18);
+
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,0.1,100);
+camera.position.set(0,0.8,7.2);
+
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.3;
+document.body.appendChild(renderer.domElement);
+
+// ===== 灯光 =====
+scene.add(new THREE.AmbientLight(0x1a1a2e,0.4));
+const dirLight=new THREE.DirectionalLight(0x8899bb,0.7);
+dirLight.position.set(-3,8,4);dirLight.castShadow=true;
+dirLight.shadow.mapSize.set(1024,1024);
+scene.add(dirLight);
+const indoorLight=new THREE.PointLight(0xffe4b5,2.5,5);
+indoorLight.position.set(0,1.0,0);scene.add(indoorLight);
+const neonBlue=new THREE.PointLight(0x4488ff,2,4);
+neonBlue.position.set(-0.8,1.4,1.2);scene.add(neonBlue);
+const neonPink=new THREE.PointLight(0xff44aa,1.2,3);
+neonPink.position.set(1.2,0.8,0.8);scene.add(neonPink);
+
+// ===== 水晶球 =====
+const globeRadius=2.2;
+const globeGroup=new THREE.Group();
+
+const globeMat=new THREE.MeshPhysicalMaterial({
+  color:0xffffff,transmission:0.95,opacity:1,metalness:0,
+  roughness:0.03,ior:1.5,thickness:0.2,clearcoat:1,clearcoatRoughness:0,
+  side:THREE.DoubleSide,transparent:true
+});
+const globeMesh=new THREE.Mesh(new THREE.SphereGeometry(globeRadius,64,64),globeMat);
+globeGroup.add(globeMesh);
+
+// 高光弧
+const hlGeom=new THREE.SphereGeometry(globeRadius*1.002,64,64,0,Math.PI*0.5,Math.PI*0.4,Math.PI*0.2);
+const hlMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.08,side:THREE.BackSide});
+globeGroup.add(new THREE.Mesh(hlGeom,hlMat));
+
+// 内壁（防穿帮）
+const innerBowl=new THREE.Mesh(
+  new THREE.SphereGeometry(globeRadius*0.92,48,48,0,Math.PI*2,0,Math.PI*0.5),
+  new THREE.MeshStandardMaterial({color:0x0a0a1a,roughness:0.9,side:THREE.BackSide})
+);
+globeGroup.add(innerBowl);
+
+scene.add(globeGroup);
+
+// ===== 景观 =====
+const landGroup=new THREE.Group();
+landGroup.position.y=-1.6;
+globeGroup.add(landGroup);
+
+// 地面
+const ground=new THREE.Mesh(
+  new THREE.CylinderGeometry(2.0,2.0,0.12,48),
+  new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0.3,metalness:0.5})
+);
+ground.receiveShadow=true;
+landGroup.add(ground);
+
+// 水洼
+for(let i=0;i<3;i++){
+  const p=new THREE.Mesh(
+    new THREE.CircleGeometry(0.15+Math.random()*0.15,16),
+    new THREE.MeshStandardMaterial({color:0x0a0a1a,roughness:0.02,metalness:0.95})
+  );
+  p.rotation.x=-Math.PI/2;
+  p.position.set((Math.random()-0.5)*2.5,(Math.random())*0.01+0.07,(Math.random()-0.5)*2.5);
+  landGroup.add(p);
+}
+
+// 反光条
+for(let i=0;i<12;i++){
+  const s=new THREE.Mesh(
+    new THREE.BoxGeometry(0.03,0.005,0.12),
+    new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xffffff,emissiveIntensity:0.25})
+  );
+  const a=(i/12)*Math.PI*2;
+  s.position.set(Math.cos(a)*1.75,0.07,Math.sin(a)*1.75);
+  s.rotation.y=-a;
+  landGroup.add(s);
+}
+
+// ===== 富士山 =====
+const fuji=new THREE.Group();
+fuji.position.set(0.2,0.06,-1.1);
+const fujiBody=new THREE.Mesh(
+  new THREE.ConeGeometry(0.75,1.3,20),
+  new THREE.MeshStandardMaterial({color:0x2a2a3e,roughness:0.9})
+);
+fuji.add(fujiBody);
+const snowCap=new THREE.Mesh(
+  new THREE.ConeGeometry(0.55,0.55,20),
+  new THREE.MeshStandardMaterial({color:0xf0f0ff,roughness:0.5})
+);
+snowCap.position.y=0.38;
+fuji.add(snowCap);
+// 月亮
+const moon=new THREE.Mesh(
+  new THREE.CircleGeometry(0.18,24),
+  new THREE.MeshBasicMaterial({color:0xfff8e0})
+);
+moon.position.set(-0.5,1.1,-0.6);
+fuji.add(moon);
+// 月晕
+const moonGlow=new THREE.Mesh(
+  new THREE.CircleGeometry(0.35,24),
+  new THREE.MeshBasicMaterial({color:0xfff8e0,transparent:true,opacity:0.1})
+);
+moonGlow.position.set(-0.5,1.1,-0.61);
+fuji.add(moonGlow);
+landGroup.add(fuji);
+
+// ===== 便利店 =====
+const store=new THREE.Group();
+store.position.set(0,0.06,0.1);
+
+// 地板
+const storeFloor=new THREE.Mesh(
+  new THREE.BoxGeometry(1.5,0.03,1.1),
+  new THREE.MeshStandardMaterial({color:0x3a3a4a,roughness:0.4})
+);
+store.add(storeFloor);
+
+// 后墙
+const backWall=new THREE.Mesh(
+  new THREE.BoxGeometry(1.5,1.1,0.04),
+  new THREE.MeshStandardMaterial({color:0xe8e8e8,roughness:0.7})
+);
+backWall.position.set(0,0.58,-0.55);
+store.add(backWall);
+
+// 左墙
+const leftWall=new THREE.Mesh(
+  new THREE.BoxGeometry(0.04,1.1,1.1),
+  new THREE.MeshStandardMaterial({color:0xe8e8e8,roughness:0.7})
+);
+leftWall.position.set(-0.73,0.58,0);
+store.add(leftWall);
+
+// 右墙矮
+const rightWall=new THREE.Mesh(
+  new THREE.BoxGeometry(0.04,0.7,1.1),
+  new THREE.MeshStandardMaterial({color:0xe8e8e8,roughness:0.7})
+);
+rightWall.position.set(0.73,0.38,0);
+store.add(rightWall);
+
+// 屋顶
+const roof=new THREE.Mesh(
+  new THREE.BoxGeometry(1.6,0.07,1.2),
+  new THREE.MeshStandardMaterial({color:0xcc2222,roughness:0.5})
+);
+roof.position.y=1.15;
+store.add(roof);
+
+// 招牌
+const sign=new THREE.Mesh(
+  new THREE.BoxGeometry(1.3,0.22,0.04),
+  new THREE.MeshStandardMaterial({color:0x111111,emissive:0x1a66cc,emissiveIntensity:0.9})
+);
+sign.position.set(0,1.35,-0.52);
+store.add(sign);
+
+// 侧招
+const sideSign=new THREE.Mesh(
+  new THREE.BoxGeometry(0.45,0.18,0.03),
+  new THREE.MeshStandardMaterial({color:0xff3333,emissive:0xff2222,emissiveIntensity:0.7})
+);
+sideSign.position.set(0.74,0.8,0);
+sideSign.rotation.y=Math.PI/2;
+store.add(sideSign);
+
+// 冷藏柜
+for(let i=0;i<4;i++){
+  const door=new THREE.Mesh(
+    new THREE.BoxGeometry(0.22,0.75,0.03),
+    new THREE.MeshStandardMaterial({color:0x112233,emissive:0x0a2244,emissiveIntensity:0.6,transparent:true,opacity:0.82})
+  );
+  door.position.set(-0.5+i*0.27,0.5,-0.5);
+  store.add(door);
+  for(let r=0;r<5;r++){
+    for(let c=0;c<3;c++){
+      const can=new THREE.Mesh(
+        new THREE.CylinderGeometry(0.012,0.012,0.035,8),
+        new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random()*0.2+0.5,0.7,0.5)})
+      );
+      can.position.set(-0.52+i*0.27+(c-1)*0.02,0.22+r*0.12,-0.52);
+      store.add(can);
+    }
+  }
+}
+
+// 货架×2
+for(let s=0;s<2;s++){
+  for(let l=0;l<4;l++){
+    const board=new THREE.Mesh(
+      new THREE.BoxGeometry(0.5,0.02,0.25),
+      new THREE.MeshStandardMaterial({color:0x999999})
+    );
+    board.position.set(-0.25+s*0.55,0.2+l*0.22,0.1);
+    store.add(board);
+    // 层板灯带
+    const strip=new THREE.Mesh(
+      new THREE.BoxGeometry(0.52,0.005,0.01),
+      new THREE.MeshBasicMaterial({color:0xffeebb})
+    );
+    strip.position.set(-0.25+s*0.55,0.2+l*0.22+0.015,0.23);
+    store.add(strip);
+    for(let p=0;p<7;p++){
+      const prod=new THREE.Mesh(
+        new THREE.BoxGeometry(0.04,0.08+Math.random()*0.04,0.04),
+        new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.6,0.5)})
+      );
+      prod.position.set(-0.2+s*0.55+p*0.06,0.25+l*0.22,0.1);
+      store.add(prod);
+    }
+  }
+}
+
+// 收银台
+const counter=new THREE.Mesh(
+  new THREE.BoxGeometry(0.32,0.55,0.22),
+  new THREE.MeshStandardMaterial({color:0xcccccc})
+);
+counter.position.set(0.5,0.3,-0.3);
+store.add(counter);
+
+const reg=new THREE.Mesh(
+  new THREE.BoxGeometry(0.12,0.1,0.08),
+  new THREE.MeshStandardMaterial({color:0x222222,emissive:0x00ff00,emissiveIntensity:0.2})
+);
+reg.position.set(0.5,0.6,-0.3);
+store.add(reg);
+
+// ATM
+const atm=new THREE.Mesh(
+  new THREE.BoxGeometry(0.16,0.28,0.05),
+  new THREE.MeshStandardMaterial({color:0x334466,emissive:0x113355,emissiveIntensity:0.5})
+);
+atm.position.set(0.6,0.55,-0.5);
+store.add(atm);
+
+// 杂志架
+const magRack=new THREE.Mesh(
+  new THREE.BoxGeometry(0.08,0.35,0.12),
+  new THREE.MeshStandardMaterial({color:0x8B4513})
+);
+magRack.position.set(-0.65,0.2,0.35);
+store.add(magRack);
+
+// 咖啡机
+const coffee=new THREE.Mesh(
+  new THREE.BoxGeometry(0.1,0.18,0.08),
+  new THREE.MeshStandardMaterial({color:0x222222,emissive:0xff6600,emissiveIntensity:0.3})
+);
+coffee.position.set(0.3,0.45,-0.5);
+store.add(coffee);
+
+// 天花板灯
+const ceilLight=new THREE.Mesh(
+  new THREE.BoxGeometry(0.9,0.02,0.35),
+  new THREE.MeshBasicMaterial({color:0xfff5e0})
+);
+ceilLight.position.set(0,1.1,0);
+store.add(ceilLight);
+
+// 玻璃幕墙
+const glassWall=new THREE.Mesh(
+  new THREE.BoxGeometry(1.52,1.0,0.02),
+  new THREE.MeshPhysicalMaterial({
+    color:0xffffff,transmission:0.92,opacity:1,metalness:0,
+    roughness:0.04,ior:1.4,thickness:0.03,transparent:true,side:THREE.DoubleSide
+  })
+);
+glassWall.position.set(0,0.6,0.56);
+store.add(glassWall);
+
+// 雨棚
+const awning=new THREE.Mesh(
+  new THREE.BoxGeometry(1.6,0.04,0.35),
+  new THREE.MeshStandardMaterial({color:0xcc2222,roughness:0.6})
+);
+awning.position.set(0,1.05,0.6);
+store.add(awning);
+
+for(let i=0;i<2;i++){
+  const pillar=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012,0.012,0.35,8),
+    new THREE.MeshStandardMaterial({color:0x666666})
+  );
+  pillar.position.set(-0.7+i*1.4,0.85,0.72);
+  store.add(pillar);
+}
+
+landGroup.add(store);
+
+// ===== 街角道具 =====
+// 贩卖机×2
+for(let i=0;i<2;i++){
+  const vm=new THREE.Mesh(
+    new THREE.BoxGeometry(0.22,0.55,0.16),
+    new THREE.MeshStandardMaterial({color:0x2244aa,emissive:i===0?0x112255:0x441133,emissiveIntensity:0.4})
+  );
+  vm.position.set(-1.3+i*2.6,0.3,0.7);
+  landGroup.add(vm);
+}
+
+// 路灯×2
+for(let i=0;i<2;i++){
+  const pole=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012,0.018,0.9,8),
+    new THREE.MeshStandardMaterial({color:0x444444})
+  );
+  pole.position.set(-1.1+i*2.2,0.45,-0.7);
+  landGroup.add(pole);
+  const lamp=new THREE.Mesh(
+    new THREE.SphereGeometry(0.05,8,8),
+    new THREE.MeshBasicMaterial({color:0xffeeaa})
+  );
+  lamp.position.set(-1.1+i*2.2,0.92,-0.7);
+  landGroup.add(lamp);
+}
+
+// 自行车×2
+for(let i=0;i<2;i++){
+  const bike=new THREE.Group();
+  const frame=new THREE.Mesh(
+    new THREE.BoxGeometry(0.28,0.02,0.08),
+    new THREE.MeshStandardMaterial({color:i===0?0x2266cc:0xcc4422})
+  );
+  bike.add(frame);
+  for(let w=0;w<2;w++){
+    const wheel=new THREE.Mesh(
+      new THREE.TorusGeometry(0.08,0.012,8,16),
+      new THREE.MeshStandardMaterial({color:0x222222})
+    );
+    wheel.position.set(-0.1+w*0.2,-0.06,0);
+    wheel.rotation.y=Math.PI/2;
+    bike.add(wheel);
+  }
+  bike.position.set(-0.7+i*1.4,0.1,0.4);
+  bike.rotation.y=i*0.6;
+  landGroup.add(bike);
+}
+
+// 垃圾桶
+const trash=new THREE.Mesh(
+  new THREE.CylinderGeometry(0.05,0.04,0.18,8),
+  new THREE.MeshStandardMaterial({color:0x555555})
+);
+trash.position.set(1.1,0.15,-0.5);
+landGroup.add(trash);
+
+// 电线杆
+const pole2=new THREE.Mesh(
+  new THREE.CylinderGeometry(0.018,0.022,1.3,8),
+  new THREE.MeshStandardMaterial({color:0x333333})
+);
+pole2.position.set(1.4,0.65,-0.9);
+landGroup.add(pole2);
+
+const wireMat=new THREE.LineBasicMaterial({color:0x111111});
+for(let i=0;i<3;i++){
+  const pts=[new THREE.Vector3(1.4,0.95-i*0.04,-0.9),new THREE.Vector3(-1.4,0.9-i*0.04,-0.7)];
+  landGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),wireMat));
+}
+
+// 路牌
+const signpost=new THREE.Group();
+const post2=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.01,0.5,6),new THREE.MeshStandardMaterial({color:0x444444}));
+post2.position.y=0.25;signpost.add(post2);
+const sb=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.05,0.01),new THREE.MeshStandardMaterial({color:0x2266cc}));
+sb.position.y=0.5;signpost.add(sb);
+signpost.position.set(-1.3,0.06,-0.4);
+landGroup.add(signpost);
+
+// 排水沟
+const drain=new THREE.Mesh(
+  new THREE.BoxGeometry(0.25,0.02,0.05),
+  new THREE.MeshStandardMaterial({color:0x222222,metalness:0.7})
+);
+drain.position.set(0.9,0.07,0.6);
+landGroup.add(drain);
+
+// 小巷
+const alley=new THREE.Mesh(
+  new THREE.BoxGeometry(0.25,0.5,0.04),
+  new THREE.MeshStandardMaterial({color:0x2a2a2a})
+);
+alley.position.set(-1.5,0.3,-0.2);
+landGroup.add(alley);
+
+// 空调
+const ac=new THREE.Mesh(
+  new THREE.BoxGeometry(0.14,0.1,0.08),
+  new THREE.MeshStandardMaterial({color:0xbbbbbb})
+);
+ac.position.set(0.85,0.75,-0.48);
+landGroup.add(ac);
+
+// 邮箱
+const mailbox=new THREE.Mesh(
+  new THREE.BoxGeometry(0.06,0.12,0.04),
+  new THREE.MeshStandardMaterial({color:0xcc4444})
+);
+mailbox.position.set(-1.0,0.12,0.6);
+landGroup.add(mailbox);
+
+// 花盆
+const pot=new THREE.Mesh(
+  new THREE.CylinderGeometry(0.04,0.03,0.08,8),
+  new THREE.MeshStandardMaterial({color:0x884422})
+);
+pot.position.set(1.3,0.04,0.3);
+landGroup.add(pot);
+
+// ===== 底座 =====
+const baseGroup=new THREE.Group();
+const b1=new THREE.Mesh(
+  new THREE.CylinderGeometry(2.4,2.7,0.35,48),
+  new THREE.MeshStandardMaterial({color:0x3d2817,roughness:0.8})
+);
+b1.position.y=-2.3;b1.receiveShadow=true;baseGroup.add(b1);
+
+const bLine=new THREE.Mesh(
+  new THREE.TorusGeometry(2.55,0.015,8,48),
+  new THREE.MeshStandardMaterial({color:0xd4a843,metalness:0.9,roughness:0.2})
+);
+bLine.rotation.x=Math.PI/2;bLine.position.y=-2.1;baseGroup.add(bLine);
+
+const b2=new THREE.Mesh(
+  new THREE.CylinderGeometry(2.2,2.4,0.3,48),
+  new THREE.MeshStandardMaterial({color:0x4a3220,roughness:0.7})
+);
+b2.position.y=-1.95;baseGroup.add(b2);
+
+const bLine2=new THREE.Mesh(
+  new THREE.TorusGeometry(2.3,0.012,8,48),
+  new THREE.MeshStandardMaterial({color:0xd4a843,metalness:0.9,roughness:0.2})
+);
+bLine2.rotation.x=Math.PI/2;bLine2.position.y=-1.78;baseGroup.add(bLine2);
+
+const b3=new THREE.Mesh(
+  new THREE.CylinderGeometry(2.1,2.2,0.2,48),
+  new THREE.MeshStandardMaterial({color:0x5a3a25,roughness:0.6})
+);
+b3.position.y=-1.65;baseGroup.add(b3);
+
+const bRing=new THREE.Mesh(
+  new THREE.TorusGeometry(2.05,0.05,16,64),
+  new THREE.MeshStandardMaterial({color:0xd4a843,metalness:0.95,roughness:0.1})
+);
+bRing.rotation.x=Math.PI/2;bRing.position.y=-1.55;baseGroup.add(bRing);
+
+const plate=new THREE.Mesh(
+  new THREE.BoxGeometry(0.5,0.12,0.015),
+  new THREE.MeshStandardMaterial({color:0xc9a84c,metalness:0.95,roughness:0.1})
+);
+plate.position.set(0,-2.1,2.5);baseGroup.add(plate);
+
+for(let i=0;i<3;i++){
+  const a=(i/3)*Math.PI*2+Math.PI/6;
+  const foot=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08,0.1,0.06,12),
+    new THREE.MeshStandardMaterial({color:0x2a2a2a,roughness:0.9})
+  );
+  foot.position.set(Math.cos(a)*2.4,-2.55,Math.sin(a)*2.4);
+  baseGroup.add(foot);
+}
+scene.add(baseGroup);
+
+// ===== 雪花 =====
+const snowCount=2000;
+const snowPos=new Float32Array(snowCount*3);
+const snowVel=new Float32Array(snowCount);
+for(let i=0;i<snowCount;i++){
+  snowPos[i*3]=(Math.random()-0.5)*4.2;
+  snowPos[i*3+1]=(Math.random()-0.5)*4.2;
+  snowPos[i*3+2]=(Math.random()-0.5)*4.2;
+  snowVel[i]=0.2+Math.random()*0.4;
+}
+const snowGeom=new THREE.BufferGeometry();
+snowGeom.setAttribute('position',new THREE.BufferAttribute(snowPos,3));
+const snowMat2=new THREE.PointsMaterial({color:0xffffff,size:0.02,transparent:true,opacity:0.7});
+const snowSys=new THREE.Points(snowGeom,snowMat2);
+globeGroup.add(snowSys);
+
+// ===== 入场动画 =====
+let animT=0;
+const animParts=[];
+function initAnim(){
+  animParts.length=0;
+  animParts.push({o:baseGroup,d:0,sy:-5});
+  animParts.push({o:ground,d:0.3,sy:-3});
+  fuji.children.forEach((c,i)=>animParts.push({o:c,d:0.5+i*0.1,sy:-3}));
+  animParts.push({o:store,d:0.9,sy:-3});
+  store.children.forEach((c,i)=>animParts.push({o:c,d:1.2+i*0.02,sy:-2}));
+  landGroup.children.forEach(c=>{
+    if(c!==ground&&c!==fuji&&c!==store) animParts.push({o:c,d:1.8+Math.random()*0.6,sy:-2});
+  });
+  animParts.push({o:globeMesh,d:2.5,sy:4,fi:true});
+  animParts.push({o:hlMat?hlMat:null,d:2.6,sy:4,fi:true});
+  animParts.push({o:snowSys,d:2.8,sy:0,fi:true});
+  animParts.forEach(p=>{
+    p.oy=p.o.position.y;
+    p.o.position.y=p.sy;
+    if(p.fi&&p.o.material){p.o.material.transparent=true;p.o.material.opacity=0;}
+  });
+}
+initAnim();
+
+// ===== 交互 =====
+let isDrag=false,px=0,py=0,rotY=0,rotX=0.15,autoRot=true,zoom=7.2;
+renderer.domElement.addEventListener('pointerdown',e=>{isDrag=true;px=e.clientX;py=e.clientY;autoRot=false;});
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(!isDrag)return;
+  rotY+=(e.clientX-px)*0.005;rotX+=(e.clientY-py)*0.003;
+  rotX=Math.max(-0.4,Math.min(1.0,rotX));px=e.clientX;py=e.clientY;
+});
+renderer.domElement.addEventListener('pointerup',()=>isDrag=false);
+renderer.domElement.addEventListener('wheel',e=>{
+  e.preventDefault();zoom+=e.deltaY*0.005;zoom=Math.max(4.5,Math.min(12,zoom));autoRot=false;
+},{passive:false});
+renderer.domElement.addEventListener('touchstart',e=>{
+  if(e.touches.length===1){isDrag=true;px=e.touches[0].clientX;py=e.touches[0].clientY;autoRot=false;}
+},{passive:true});
+renderer.domElement.addEventListener('touchmove',e=>{
+  if(!isDrag||e.touches.length!==1)return;
+  rotY+=(e.touches[0].clientX-px)*0.005;rotX+=(e.touches[0].clientY-py)*0.003;
+  rotX=Math.max(-0.4,Math.min(1.0,rotX));px=e.touches[0].clientX;py=e.touches[0].clientY;
+},{passive:true});
+renderer.domElement.addEventListener('touchend',()=>isDrag=false);
+
+// ===== 渲染 =====
+const clock=new THREE.Clock();
+document.getElementById('loading').classList.add('hide');
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=clock.getDelta();
+  const t=clock.getElapsedTime();
+
+  // 入场动画
+  if(animT<3.5){
+    animT+=dt;
+    animParts.forEach(p=>{
+      if(!p.o)return;
+      const lt=Math.max(0,Math.min(1,(animT-p.d)/0.8));
+      const eased=1-Math.pow(1-lt,3);
+      p.o.position.y=p.sy+(p.oy-p.sy)*eased;
+      if(p.fi&&p.o.material) p.o.material.opacity=lt*0.95;
+      if(lt>0.8&&lt<1){
+        const bounce=Math.sin((lt-0.8)*5*Math.PI)*0.04*(1-lt);
+        p.o.position.y+=bounce;
+      }
+    });
+  }
+
+  // 雪花
+  const pos=snowGeom.attributes.position.array;
+  for(let i=0;i<snowCount;i++){
+    pos[i*3+1]-=snowVel[i]*dt*0.3;
+    pos[i*3]+=Math.sin(t*0.3+i)*0.0008;
+    if(pos[i*3+1]<-2.1) pos[i*3+1]=2.1;
+  }
+  snowGeom.attributes.position.needsUpdate=true;
+
+  if(autoRot) rotY+=dt*0.12;
+
+  const tx=Math.sin(rotY)*Math.cos(rotX)*zoom;
+  const ty=Math.sin(rotX)*zoom+0.5;
+  const tz=Math.cos(rotY)*Math.cos(rotX)*zoom;
+  camera.position.lerp(new THREE.Vector3(tx,ty,tz),0.08);
+  camera.lookAt(0,0.5,0);
+
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
