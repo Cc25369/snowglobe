@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>3D 雪景水晶球</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #050814; font-family: sans-serif; }
+  canvas { display: block; }
+  #ui { position: fixed; bottom: 5%; left: 0; width: 100%; display: flex; justify-content: center; gap: 12px; z-index: 10; }
+  .btn { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 10px 18px; border-radius: 30px; backdrop-filter: blur(8px); cursor: pointer; font-size: 14px; }
+  .btn:active { background: rgba(255,255,255,0.3); }
+  #tip { position: fixed; top: 5%; left: 0; width: 100%; text-align: center; color: rgba(255,255,255,0.6); font-size: 12px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="tip">拖拽旋转 · 双指缩放</div>
+<div id="ui">
+  <button class="btn" id="snowBtn">❄️ 下雪</button>
+  <button class="btn" id="shakeBtn">↻ 摇晃</button>
+  <button class="btn" id="playBtn">▶ 播放音乐</button>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/OutputPass.js';
+
+// --- 基础设置 ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050814);
+scene.fog = new THREE.FogExp2(0x050814, 0.02);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 1.5, 6.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.minDistance = 4.5;
+controls.maxDistance = 10;
+controls.target.set(0, 0.5, 0);
+
+// 环境光（增强玻璃反射）
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new THREE.Scene().add(new THREE.HemisphereLight(0xffffff, 0x444466, 1)), 0.04).texture;
+scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+const dirLight = new THREE.DirectionalLight(0xffeebb, 1.2);
+dirLight.position.set(5, 8, 3);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024, 1024);
+dirLight.shadow.camera.left = -5; dirLight.shadow.camera.right = 5;
+dirLight.shadow.camera.top = 5; dirLight.shadow.camera.bottom = -5;
+scene.add(dirLight);
+
+// 后处理（霓虹发光）
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.8, 0.2);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// --- 水晶球组 ---
+const GLOBE_R = 2.2;
+const BASE_Y = -1.2;
+const globeGroup = new THREE.Group();
+globeGroup.position.y = BASE_Y + GLOBE_R;
+scene.add(globeGroup);
+
+// 1. 底座（实质感：木纹+金属环）
+const baseGroup = new THREE.Group();
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a2e1a, roughness: 0.8, metalness: 0.1 });
+const metalMat = new THREE.MeshStandardMaterial({ color: 0xc0a020, roughness: 0.3, metalness: 0.8 });
+const baseCyl1 = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.5, 0.3, 32), woodMat);
+baseCyl1.position.y = -GLOBE_R - 0.15; baseCyl1.castShadow = baseCyl1.receiveShadow = true;
+const baseCyl2 = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 0.4, 32), woodMat);
+baseCyl2.position.y = -GLOBE_R - 0.5; baseCyl2.castShadow = baseCyl2.receiveShadow = true;
+const metalRing = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.06, 16, 64), metalMat);
+metalRing.rotation.x = Math.PI/2; metalRing.position.y = -GLOBE_R - 0.28;
+const namePlate = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.15, 0.05), metalMat);
+namePlate.position.set(0, -GLOBE_R - 0.5, 1.25);
+baseGroup.add(baseCyl1, baseCyl2, metalRing, namePlate);
+scene.add(baseGroup);
+
+// 2. 玻璃球壳（真实物理质感）
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, transmission: 0.95, opacity: 1, transparent: true,
+  roughness: 0.05, metalness: 0, ior: 1.52, thickness: 1.5,
+  clearcoat: 1, clearcoatRoughness: 0.05, depthWrite: false, side: THREE.FrontSide
+});
+const glassSphere = new THREE.Mesh(new THREE.SphereGeometry(GLOBE_R, 64, 64), glassMat);
+glassSphere.renderOrder = 2;
+globeGroup.add(glassSphere);
+// 玻璃高光环（增强立体感）
+const glassHighlight = new THREE.Mesh(new THREE.TorusGeometry(GLOBE_R*0.85, 0.02, 16, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false }));
+glassHighlight.rotation.x = Math.PI/2.5; glassHighlight.position.y = GLOBE_R*0.2;
+globeGroup.add(glassHighlight);
+
+// 3. 内部场景（缩放至占球内 2/3，零删减原街角）
+const innerRoot = new THREE.Group();
+innerRoot.scale.set(0.12, 0.12, 0.12); // 放大占比
+innerRoot.position.y = -GLOBE_R * 0.6; // 贴底
+globeGroup.add(innerRoot);
+
+// 地面雪地
+const ground = new THREE.Mesh(new THREE.CylinderGeometry(12, 12, 0.5, 32), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.9 }));
+ground.position.y = -0.25; ground.receiveShadow = true;
+innerRoot.add(ground);
+
+// 便利店
+const shop = new THREE.Group();
+const shopBody = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 4), new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.7 }));
+shopBody.position.y = 2; shopBody.castShadow = shopBody.receiveShadow = true; shop.add(shopBody);
+const shopWin = new THREE.Mesh(new THREE.BoxGeometry(5.8, 2.5, 4.1), new THREE.MeshStandardMaterial({ color: 0xffaa44, emissive: 0xff6622, emissiveIntensity: 0.6, roughness: 0.4 }));
+shopWin.position.y = 2.2; shop.add(shopWin);
+const shopRoof = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.3, 4.5), new THREE.MeshStandardMaterial({ color: 0xee2222, roughness: 0.6 }));
+shopRoof.position.y = 4.15; shop.add(shopRoof);
+const shopSign = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 1.2 }));
+shopSign.position.set(0, 3.5, 2.1); shop.add(shopSign);
+shop.position.set(0, 0, -2); innerRoot.add(shop);
+
+// 路灯
+const lamp = new THREE.Group();
+const lampPole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4, 8), new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.6 }));
+lampPole.position.y = 2; lamp.add(lampPole);
+const lampHead = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffcc66, emissive: 0xffaa00, emissiveIntensity: 1.5 }));
+lampHead.position.y = 4; lamp.add(lampHead);
+lamp.position.set(-4, 0, 2); innerRoot.add(lamp);
+
+// 贩卖机
+const vend = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.5, 0.8), new THREE.MeshStandardMaterial({ color: 0x2244aa, roughness: 0.5, emissive: 0x112266, emissiveIntensity: 0.4 }));
+vend.position.set(3.5, 1.25, 1.5); vend.castShadow = true; innerRoot.add(vend);
+const vendScreen = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.85), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 0.8 }));
+vendScreen.position.set(3.5, 1.5, 1.5); innerRoot.add(vendScreen);
+
+// 邮筒
+const mailbox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.6), new THREE.MeshStandardMaterial({ color: 0x2a5cb0, roughness: 0.6 }));
+mailbox.position.set(4.5, 0.6, -1); mailbox.castShadow = true; innerRoot.add(mailbox);
+const mbTop = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 0.7), new THREE.MeshStandardMaterial({ color: 0x1a3a7a }));
+mbTop.position.set(4.5, 1.25, -1); innerRoot.add(mbTop);
+
+// 停车计费表
+const meter = new THREE.Group();
+const mBody = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.4, 0.3), new THREE.MeshStandardMaterial({ color: 0xc0a020, metalness: 0.6 }));
+mBody.position.y = 0.7; meter.add(mBody);
+const mTop = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 12), new THREE.MeshStandardMaterial({ color: 0xc0a020, metalness: 0.6 }));
+mTop.position.y = 1.45; meter.add(mTop);
+meter.position.set(-5, 0, -1); innerRoot.add(meter);
+
+// 盆栽
+[[-5, 3], [5, -3]].forEach(([x,z], i) => {
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.5, 12), new THREE.MeshStandardMaterial({ color: 0x8a6a4a }));
+  pot.position.set(x, 0.25, z); innerRoot.add(pot);
+  const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), new THREE.MeshStandardMaterial({ color: i===0?0x3a8a4a:0x2a7a3a }));
+  leaves.position.set(x, 0.9, z); innerRoot.add(leaves);
+});
+
+// 消防栓
+const hydrant = new THREE.Group();
+const hBody = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.7, 10), new THREE.MeshStandardMaterial({ color: 0xd84030, metalness: 0.4 }));
+hBody.position.y = 0.35; hydrant.add(hBody);
+const hTop = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.16, 10), new THREE.MeshStandardMaterial({ color: 0xd84030 }));
+hTop.position.y = 0.75; hydrant.add(hTop);
+hydrant.position.set(2, 0, -3); innerRoot.add(hydrant);
+
+// 自行车
+function makeBike(){
+  const g = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xd84030, metalness: 0.3 });
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20 });
+  [[-0.7, 0.45],[0.7, 0.45]].forEach(wp => {
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.07, 8, 16), wheelMat);
+    wheel.position.set(wp[0], wp[1], 0); wheel.rotation.y = Math.PI/2; g.add(wheel);
+  });
+  const topTube = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.07, 0.07), frameMat);
+  topTube.position.y = 0.85; g.add(topTube);
+  const seatTube = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.7, 0.07), frameMat);
+  seatTube.position.set(-0.6, 0.6, 0); g.add(seatTube);
+  g.add(topTube, seatTube);
+  return g;
+}
+const bike = makeBike();
+bike.position.set(1.5, 0, 2.5); bike.rotation.y = -0.5; innerRoot.add(bike);
+
+// 背景山/树（增加层次）
+const mtMat = new THREE.MeshStandardMaterial({ color: 0x1f2a3a, roughness: 0.95 });
+for(let i=0; i<5; i++){
+  const a = (i/5)*Math.PI*2, r = 14 + (i%2)*2;
+  const mt = new THREE.Mesh(new THREE.ConeGeometry(2.2, 4.5, 4), mtMat);
+  mt.position.set(Math.cos(a)*r, 2.2, Math.sin(a)*r); innerRoot.add(mt);
+  const snow = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.8, 4), new THREE.MeshStandardMaterial({ color: 0xeeeeee }));
+  snow.position.set(Math.cos(a)*r, 4.0, Math.sin(a)*r); innerRoot.add(snow);
+}
+
+// 4. 雪花（球内，从上往下）
+let snowOn = true;
+const SNOW_COUNT = 400;
+const snowGeo = new THREE.BufferGeometry();
+const snowPos = new Float32Array(SNOW_COUNT*3);
+const snowVel = new Float32Array(SNOW_COUNT);
+function resetSnow(i, randomY=true){
+  const u = Math.random(), v = Math.random();
+  const theta = 2*Math.PI*u, phi = Math.acos(2*v-1);
+  const r = Math.cbrt(Math.random()) * GLOBE_R*0.88;
+  snowPos[i*3] = r*Math.sin(phi)*Math.cos(theta);
+  snowPos[i*3+1] = randomY ? (Math.random()-0.5)*GLOBE_R*1.6 : GLOBE_R*0.9;
+  snowPos[i*3+2] = r*Math.sin(phi)*Math.sin(theta);
+  snowVel[i] = 0.15 + Math.random()*0.25;
+}
+for(let i=0; i<SNOW_COUNT; i++) resetSnow(i, true);
+snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+const snowMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.04, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending });
+const snowSystem = new THREE.Points(snowGeo, snowMat);
+globeGroup.add(snowSystem);
+
+// --- 交互 ---
+let isDrag=false, lastX=0, auto=true, rot=0, shakeAmt=0;
+renderer.domElement.addEventListener('pointerdown', e => { isDrag=true; lastX=e.clientX; auto=false; });
+renderer.domElement.addEventListener('pointermove', e => { if(isDrag) rot += (e.clientX-lastX)*0.005; lastX=e.clientX; });
+renderer.domElement.addEventListener('pointerup', () => isDrag=false);
+renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); camera.position.z = Math.max(4.5, Math.min(10, camera.position.z + e.deltaY*0.005)); auto=false; }, {passive:false});
+
+document.getElementById('snowBtn').onclick = () => snowOn = !snowOn;
+document.getElementById('shakeBtn').onclick = () => shakeAmt = 0.15;
+
+let audioCtx, isPlaying=false, noteIdx=0;
+const notes = [261.63, 329.63, 392, 523.25, 493.88, 392, 329.63, 261.63];
+document.getElementById('playBtn').onclick = function(){
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  isPlaying = !isPlaying;
+  this.innerHTML = isPlaying ? '⏸ 暂停' : '▶ 播放音乐';
+  if(isPlaying){ audioCtx.resume(); playNote(); } else { audioCtx.suspend(); }
+};
+function playNote(){
+  if(!isPlaying) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = 'sine'; o.frequency.value = notes[noteIdx%notes.length];
+  g.gain.setValueAtTime(0, audioCtx.currentTime); g.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime+0.05); g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+0.8);
+  o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.8);
+  noteIdx++; setTimeout(playNote, 400+Math.random()*200);
+}
+
+// --- 动画循环 ---
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta(), t = clock.elapsedTime;
+
+  if(shakeAmt > 0.01){
+    globeGroup.position.x = Math.sin(t*20)*shakeAmt;
+    globeGroup.position.y = BASE_Y + GLOBE_R + Math.cos(t*15)*shakeAmt*0.5;
+    shakeAmt *= 0.94;
+  } else { globeGroup.position.set(0, BASE_Y + GLOBE_R, 0); }
+
+  if(auto && !isDrag) rot += 0.002;
+  globeGroup.rotation.y = rot;
+
+  if(snowOn){
+    for(let i=0; i<SNOW_COUNT; i++){
+      snowPos[i*3+1] -= snowVel[i] * dt * 10;
+      snowPos[i*3] += Math.sin(t*2+i*0.1)*0.002;
+      const x=snowPos[i*3], y=snowPos[i*3+1], z=snowPos[i*3+2];
+      if(y < -GLOBE_R*0.8 || Math.sqrt(x*x+y*y+z*z) > GLOBE_R*0.92) resetSnow(i, false);
+    }
+    snowGeo.attributes.position.needsUpdate = true;
+  }
+
+  controls.update();
+  composer.render();
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
